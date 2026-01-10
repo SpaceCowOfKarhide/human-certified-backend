@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Human Certified AI Detector</title>
+
+<!-- PWA manifest & theme -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1A237E">
+
+<style>
+    body { 
+        font-family: Arial, sans-serif; 
+        padding: 2rem; 
+        background: #1A237E; 
+        color: #fff;
+    }
+    h1 { text-align: center; color: #E0E0FF; }
+
+    #dropArea { 
+        border: 2px dashed #aaa; 
+        padding: 2rem; 
+        text-align: center; 
+        cursor: pointer; 
+        background: #283593;
+        border-radius: 8px;
+        transition: border-color 0.3s, background 0.3s;
+        color: #E0E0FF;
+        margin-bottom: 2rem;
+    }
+    #dropArea.dragover { border-color: #fff; background: #3949AB; }
+
+    .itemContainer {
+        background: #303F9F;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-top: 1.5rem;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        text-align: center;
+    }
+
+    .previewImg { max-width: 200px; border-radius: 8px; margin-bottom: 0.5rem; }
+    .spinner { font-weight: bold; color: #FFD54F; margin-top: 0.5rem; }
+    .resultLabel { font-size: 1.3rem; font-weight: bold; margin-top: 0.3rem; }
+    .confidencePercent { font-weight: bold; margin-top: 0.3rem; }
+
+    .barContainer {
+        width: 100%;
+        height: 20px;
+        background: #5C6BC0;
+        border-radius: 10px;
+        overflow: hidden;
+        margin-top: 0.3rem;
+        margin-bottom: 0.3rem;
+    }
+    .bar { height: 100%; width: 0%; border-radius: 10px; transition: width 1s ease; }
+
+    .videoCard {
+        background: #303F9F;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+        text-align: center;
+        margin-top: 1.5rem;
+    }
+</style>
+</head>
+<body>
+
+<h1>Human Certified AI Detector</h1>
+
+<!-- Image Upload -->
+<div id="dropArea">Click or drag images here</div>
+<input type="file" id="fileInput" style="display:none" accept="image/*" multiple />
+
+<!-- Video Upload -->
+<h2 style="text-align:center;">Video AI Detector</h2>
+<div id="videoDropArea" style="
+    border:2px dashed #aaa; 
+    padding:2rem; 
+    text-align:center; 
+    cursor:pointer; 
+    background:#283593; 
+    border-radius:8px;
+    color:#E0E0FF;
+    margin-bottom:1rem;">
+Click or drag a video here
+</div>
+<input type="file" id="videoInput" style="display:none" accept="video/mp4,video/mov,video/webm" />
+
+<video id="videoPreview" controls style="max-width:300px; display:none; border-radius:8px; margin-bottom:1rem;"></video>
+<div id="videoSpinner" style="display:none; font-weight:bold; color:#FFD54F;">🔄 Analyzing video...</div>
+<div id="videoResultCard" class="videoCard" style="display:none;">
+    <div id="videoFinalResult" style="font-size:1.3rem; font-weight:bold;"></div>
+    <div id="videoFrameBreakdown" style="margin-top:0.5rem; font-size:0.9rem;"></div>
+</div>
+
+<div id="results"></div>
+
+<script>
+const API_BASE = 
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1"
+        ? "http://127.0.0.1:8000"
+        : "https://YOUR-BACKEND-URL";
+
+/* ------------------ REGISTER SERVICE WORKER ------------------ */
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+        .then(reg => console.log('Service Worker registered', reg))
+        .catch(err => console.log('Service Worker failed', err));
+    });
+}
+
+/* ------------------ IMAGE UPLOAD ------------------ */
+const dropArea = document.getElementById("dropArea");
+const fileInput = document.getElementById("fileInput");
+const resultsDiv = document.getElementById("results");
+
+dropArea.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", () => handleFiles(fileInput.files));
+
+dropArea.addEventListener("dragover", e => { e.preventDefault(); dropArea.classList.add("dragover"); });
+dropArea.addEventListener("dragleave", () => dropArea.classList.remove("dragover"));
+dropArea.addEventListener("drop", e => {
+    e.preventDefault();
+    dropArea.classList.remove("dragover");
+    handleFiles(e.dataTransfer.files);
+});
+
+function handleFiles(files) {
+    for (const file of files) processFile(file);
+}
+
+async function processFile(file) {
+    const container = document.createElement("div");
+    container.className = "itemContainer";
+    container.innerHTML = `
+        <img class="previewImg" />
+        <div class="spinner">🔄 Analyzing...</div>
+        <div class="resultLabel"></div>
+        <div class="confidencePercent"></div>
+        <div class="barContainer"><div class="bar"></div></div>
+    `;
+    resultsDiv.prepend(container);
+
+    const imgEl = container.querySelector(".previewImg");
+    const spinner = container.querySelector(".spinner");
+    const resultLabel = container.querySelector(".resultLabel");
+    const confidencePercent = container.querySelector(".confidencePercent");
+    const bar = container.querySelector(".bar");
+
+    const reader = new FileReader();
+    reader.onload = () => imgEl.src = reader.result;
+    reader.readAsDataURL(file);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+       const res = await fetch(`${API_BASE}/analyze`, {
+    method: "POST",
+    body: formData
+});
+
+        const data = await res.json();
+        spinner.style.display = "none";
+
+        let color;
+        if (data.result.includes("Human")) color = "#43B48C";
+        else if (data.result.includes("Mixed")) color = "#FFD54F";
+        else color = "#9C27B0";
+
+        resultLabel.textContent = data.result;
+        resultLabel.style.color = color;
+
+        const confidence = parseFloat(data.confidence);
+        confidencePercent.textContent = confidence.toFixed(1) + "%";
+        bar.style.background = color;
+        setTimeout(() => { bar.style.width = confidence + "%"; }, 100);
+    } catch (err) {
+        spinner.textContent = "⚠️ Error contacting backend";
+        console.error(err);
+    }
+}
+
+/* ------------------ VIDEO UPLOAD ------------------ */
+const videoDropArea = document.getElementById("videoDropArea");
+const videoInput = document.getElementById("videoInput");
+const videoPreview = document.getElementById("videoPreview");
+const videoSpinner = document.getElementById("videoSpinner");
+const videoResultCard = document.getElementById("videoResultCard");
+const videoFinalResult = document.getElementById("videoFinalResult");
+const videoFrameBreakdown = document.getElementById("videoFrameBreakdown");
+
+videoDropArea.addEventListener("click", () => videoInput.click());
+videoDropArea.addEventListener("dragover", e => { e.preventDefault(); videoDropArea.style.background = "#3949AB"; });
+videoDropArea.addEventListener("dragleave", () => videoDropArea.style.background = "#283593");
+videoDropArea.addEventListener("drop", e => {
+    e.preventDefault();
+    videoDropArea.style.background = "#283593";
+    if (e.dataTransfer.files.length > 0) processVideo(e.dataTransfer.files[0]);
+});
+videoInput.addEventListener("change", () => { if (videoInput.files.length > 0) processVideo(videoInput.files[0]); });
+
+async function processVideo(file) {
+    videoPreview.style.display = "none";
+    videoResultCard.style.display = "none";
+    videoSpinner.style.display = "block";
+
+    const url = URL.createObjectURL(file);
+    videoPreview.src = url;
+    videoPreview.style.display = "block";
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+       const response = await fetch(`${API_BASE}/analyze_video`, {
+    method: "POST",
+    body: formData
+});
+
+        const data = await response.json();
+        videoSpinner.style.display = "none";
+        videoResultCard.style.display = "block";
+
+        let color;
+        if (data.final_result.includes("Human")) color = "#43B48C";
+        else if (data.final_result.includes("Mixed")) color = "#FFD54F";
+        else color = "#9C27B0";
+
+        videoFinalResult.textContent = `${data.final_result} (${data.avg_confidence})`;
+        videoFinalResult.style.color = color;
+
+        videoFrameBreakdown.textContent =
+            `${data.ai_frames} AI frames • ${data.human_frames} human frames • total ${data.total_frames_analyzed}`;
+    } catch (err) {
+        videoSpinner.textContent = "⚠️ Error contacting backend";
+        console.error(err);
+    }
+}
+</script>
+</body>
+</html>
