@@ -1,12 +1,18 @@
-self.addEventListener('install', e => {
-    console.log('Service Worker: Installed');
-});
+const cacheName = 'ai-detector-cache-v1';
+const assetsToCache = [
+    './',
+    './index.html',
+    './manifest.json',
+];
 
-self.addEventListener('activate', e => {
-    console.log('Service Worker: Activated');
+self.addEventListener('install', e => {
+    e.waitUntil(
+        caches.open(cacheName).then(cache => cache.addAll(assetsToCache))
+    );
 });
 
 self.addEventListener('fetch', e => {
-    // Optional: add caching here
-    // e.respondWith(fetch(e.request));
+    e.respondWith(
+        caches.match(e.request).then(response => response || fetch(e.request))
+    );
 });
